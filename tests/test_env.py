@@ -1,12 +1,11 @@
 import os
-from nose.tools import assert_raises
 from flask import Flask
 from flask_assets import Environment, Bundle
 
 
 class TestEnv:
 
-    def setup(self):
+    def setup_method(self):
         self.app = Flask(__name__)
         self.env = Environment(self.app)
         self.env.debug = True

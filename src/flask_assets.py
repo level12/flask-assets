@@ -5,7 +5,9 @@ from __future__ import print_function
 import logging
 from os import path
 
-from flask import _request_ctx_stack, current_app
+from packaging import version
+
+import flask
 from flask.templating import render_template_string
 # We want to expose Bundle via this module.
 from webassets import Bundle
@@ -270,9 +272,17 @@ class FlaskResolver(Resolver):
             filename = rel_path
 
         flask_ctx = None
-        if not _request_ctx_stack.top:
-            flask_ctx = ctx.environment._app.test_request_context()
-            flask_ctx.push()
+        if version.parse(flask.__version__) < version.parse("2.2.0"):
+            if not flask._request_ctx_stack.top:
+                flask_ctx = ctx.environment._app.test_request_context()
+                flask_ctx.push()
+        else:
+            try:
+                flask.globals.request_ctx.request
+            except RuntimeError:
+                flask_ctx = ctx.environment._app.test_request_context()
+                flask_ctx.push()
+
         try:
             url = url_for(endpoint, filename=filename)
             # In some cases, url will be an absolute url with a scheme and hostname.
@@ -314,13 +324,20 @@ class Environment(BaseEnvironment):
         if self.app is not None:
             return self.app
 
-        ctx = _request_ctx_stack.top
+        if version.parse(flask.__version__) < version.parse("2.2.0"):
+            ctx = flask._request_ctx_stack.top
+        else:
+            ctx = flask.globals.request_ctx
+
         if ctx is not None:
             return ctx.app
 
         try:
-            from flask import _app_ctx_stack
-            app_ctx = _app_ctx_stack.top
+            if version.parse(flask.__version__) < version.parse("2.2.0"):
+                from flask import _app_ctx_stack
+                app_ctx = _app_ctx_stack.top
+            else:
+                app_ctx = flask.globals.app_ctx
             if app_ctx is not None:
                 return app_ctx.app
         except ImportError:
@@ -329,8 +346,6 @@ class Environment(BaseEnvironment):
         raise RuntimeError('assets instance not bound to an application, '+
                             'and no application in current context')
 
-
-
     # XXX: This is required because in a couple of places, webassets 0.6
     # still access env.directory, at one point even directly. We need to
     # fix this for 0.6 compatibility, but it might be preferable to
@@ -338,6 +353,7 @@ class Environment(BaseEnvironment):
     # like the cache directory and output files.
     def set_directory(self, directory):
         self.config['directory'] = directory
+
     def get_directory(self):
         if self.config.get('directory') is not None:
             return self.config['directory']
@@ -475,7 +491,7 @@ else:
         logger.addHandler(logging.StreamHandler())
         logger.setLevel(logging.DEBUG)
         cmdenv = CommandLineEnvironment(
-            current_app.jinja_env.assets_environment, logger
+            flask.current_app.jinja_env.assets_environment, logger
         )
         getattr(cmdenv, cmd)()
 

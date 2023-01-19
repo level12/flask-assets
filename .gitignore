@@ -13,3 +13,6 @@
 /build/
 /dist/
 /src/Flask_Assets.egg-info/
+venv
+tests/static/out
+tests/static/.webassets-cache
