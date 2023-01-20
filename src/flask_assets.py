@@ -272,16 +272,19 @@ class FlaskResolver(Resolver):
             filename = rel_path
 
         flask_ctx = None
+        context_missing = False
         if version.parse(flask.__version__) < version.parse("2.2.0"):
             if not flask._request_ctx_stack.top:
-                flask_ctx = ctx.environment._app.test_request_context()
-                flask_ctx.push()
+                context_missing = True
         else:
             try:
                 flask.globals.request_ctx.request
             except RuntimeError:
-                flask_ctx = ctx.environment._app.test_request_context()
-                flask_ctx.push()
+                context_missing = True
+
+        if context_missing:
+            flask_ctx = ctx.environment._app.test_request_context()
+            flask_ctx.push()
 
         try:
             url = url_for(endpoint, filename=filename)
