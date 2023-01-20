@@ -279,7 +279,9 @@ class FlaskResolver(Resolver):
         else:
             try:
                 flask.globals.request_ctx.request
-            except RuntimeError:
+            except RuntimeError as rte:
+                if not str(rte).startswith('Working outside of request context'):
+                    raise
                 context_missing = True
 
         if context_missing:
