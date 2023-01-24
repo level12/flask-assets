@@ -1,11 +1,14 @@
 from __future__ import absolute_import
-from nose.tools import assert_raises
+
+import flask
+import pytest
 
 from flask import Flask
 from flask_assets import Environment, Bundle
 from webassets.bundle import get_all_bundle_files
 from tests.helpers import TempEnvironmentHelper, Module, Blueprint
 
+from packaging import version
 
 def test_import():
     # We want to expose these via the assets extension module.
@@ -25,10 +28,17 @@ class TestUrlAndDirectory(TempEnvironmentHelper):
     Let's test the different scenarios to ensure everything works.
     """
 
-    def setup(self):
+    def setup_method(self):
         TempEnvironmentHelper.setup(self)
 
-        self.app = Flask(__name__, static_path='/app_static')
+        kwargs = {}
+        if int(flask.__version__.split('.')[0]) < 1:
+            kwargs['static_path'] = '/app_static'
+        else:
+            kwargs['static_url_path'] = '/app_static'
+
+        self.app = Flask(__name__, **kwargs)
+
         from tests import test_module
         if not Blueprint:
             self.module = Module(test_module.__name__, name='module',
@@ -42,10 +52,11 @@ class TestUrlAndDirectory(TempEnvironmentHelper):
         self.env = Environment(self.app)
 
     def test_config_values_not_set_by_default(self):
-        assert not 'directory' in self.env.config
-        assert not 'url' in self.env.config
-        assert_raises(KeyError, self.env.config.__getitem__, 'directory')
-        assert_raises(KeyError, self.env.config.__getitem__, 'url')
+        assert 'directory' not in self.env.config
+        assert 'url' not in self.env.config
+        with pytest.raises(KeyError):
+            self.env.config.__getitem__('directory')
+            self.env.config.__getitem__('url')
 
     def test_directory_auto(self):
         """Test how we resolve file references through the Flask static
@@ -65,15 +76,15 @@ class TestUrlAndDirectory(TempEnvironmentHelper):
         assert get_all_bundle_files(Bundle('./module/bar'), self.env) == [root + '/static/module/bar']
 
         # Custom static folder
-        self.app.static_folder = '/'
-        assert get_all_bundle_files(Bundle('foo'), self.env) == ['/foo']
+        self.app.static_folder = '/bar'
+        assert get_all_bundle_files(Bundle('foo'), self.env)[0].endswith('/bar/foo')
 
     def test_url_auto(self):
         """Test how urls are generated via the Flask static system
         by default (if no custom 'env.url' etc. values have been
         configured manually).
         """
-        assert not 'url' in self.env.config
+        assert 'url' not in self.env.config
 
         assert Bundle('foo', env=self.env).urls() == ['/app_static/foo']
         # Urls for files that point to a module use that module's url prefix.
@@ -83,8 +94,14 @@ class TestUrlAndDirectory(TempEnvironmentHelper):
 
         # [Regression] Ensure that any request context we may have added
         # to the stack has been removed.
-        from flask import _request_ctx_stack
-        assert _request_ctx_stack.top is None
+
+        if version.parse(flask.__version__) < version.parse("2.2.0"):
+            assert not flask._request_ctx_stack.top
+        else:
+            from flask.globals import request_ctx
+
+            with pytest.raises(RuntimeError):
+                assert not request_ctx.request
 
     def test_custom_load_path(self):
         """A custom load_path is configured - this will affect how
@@ -95,7 +112,6 @@ class TestUrlAndDirectory(TempEnvironmentHelper):
         assert get_all_bundle_files(Bundle('foo'), self.env) == [self.path('foo')]
         # We do not recognize references to modules.
         assert get_all_bundle_files(Bundle('module/bar'), self.env) == [self.path('module/bar')]
-
 
         assert Bundle('foo', env=self.env).urls() == ['/custom/foo']
         assert Bundle('module/bar', env=self.env).urls() == ['/custom/module/bar']
@@ -149,8 +165,8 @@ class TestUrlAndDirectoryWithInitApp(object):
     values also work if the application is initialized via "init_app()".
     """
 
-    def setup(self):
-        self.app = Flask(__name__, static_path='/initapp_static')
+    def setup_method(self):
+        self.app = Flask(__name__, static_url_path='/initapp_static')
         self.env = Environment()
         self.env.init_app(self.app)
 
@@ -233,7 +249,8 @@ class TestBlueprints(TempEnvironmentHelper):
     def test_blueprint_no_static_folder(self):
         """Test dealing with a blueprint without a static folder."""
         self.make_blueprint('module')
-        assert_raises(TypeError, self.mkbundle('module/foo').urls)
+        with pytest.raises(TypeError):
+            self.mkbundle('module/foo').urls()
 
     def test_cssrewrite(self):
         """Make sure cssrewrite works with Blueprints.
